@@ -1,0 +1,55 @@
+kind: pipeline
+type: docker      # 在 Docker 內部執行管道命令
+name: test       # 可自行定義的名稱
+
+clone:
+  disable: true
+
+steps:
+  - name: clone
+    image: bitnami/git
+    pull: if-not-exists
+    environment:
+      SSHKEY:
+        from_secret: drone_ci_sshkey_file
+      GIT_HOST:
+        from_secret: git_server_host
+      GIT_PORT:
+        from_secret: git_server_port
+      DRONE_GIT_SSH_URL:
+        from_secret: git_ssh_url
+    commands:
+      - ls -la
+      - mkdir -p $HOME/.ssh/
+      - echo "$SSHKEY" > $HOME/.ssh/id_rsa
+      - chmod 600 $HOME/.ssh/id_rsa  # Set strict permissions on the key
+      - chmod 700 $HOME/.ssh         # Ensure .ssh directory has correct permissions
+      - eval $(ssh-agent -s)         # Start the SSH agent
+      - echo "$SSHKEY"
+      - ssh-add $HOME/.ssh/id_rsa    # Add the private key to the SSH agent
+      - ssh-keyscan -p $GIT_PORT $GIT_HOST > $HOME/.ssh/known_hosts
+      - git clone $DRONE_GIT_SSH_URL .
+      - git submodule update --init --recursive --remote
+      - git switch develop
+      - git pull
+      - git status
+
+  - name: tag-docker-image
+    image: alpine
+    commands:
+    - echo -n "$(date +'%Y-%m-%d_%H-%M')_${DRONE_COMMIT}, latest" > .tags
+
+  # - name: build-docker-image
+  #   image: plugins/docker
+  #   settings:
+  #     repo: host.docker.internal:80/test/drone_test
+  #     registry: host.docker.internal:80
+  #     username: admin
+  #     password: Harbor12345
+  #     insecure: true
+trigger: 
+  event:
+  - push
+  - custom
+  branch:
+  - main
